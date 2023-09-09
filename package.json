@@ -12,6 +12,7 @@
   "dependencies": {
     "convert-excel-to-json": "^1.7.0",
     "dotenv": "^16.3.1",
-    "jsdom": "^22.1.0"
+    "jsdom": "^22.1.0",
+    "json-2-csv": "^4.1.0"
   }
 }

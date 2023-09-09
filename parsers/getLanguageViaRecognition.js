@@ -8,9 +8,15 @@ async function getLanguageViaRecognition(website) {
   try {
     const response = await fetch(website);
 
+    if (!response.ok || response.status > 299) {
+      return null;
+    }
+
     const htmlString = await response.text();
 
     const dom = new JSDOM(htmlString);
+
+    if (!dom) return null;
 
     const textFilledNodes = dom.window.document.querySelectorAll(
       "h1, h2, h3, a, p, span"
@@ -20,7 +26,7 @@ async function getLanguageViaRecognition(website) {
       .map((node) => node.textContent.replace(/\s{2,}/g, "").trim())
       .filter((text) => text && text.length > 15);
 
-    const textToCheck = filtered.join(", ").slice(0, 150);
+    const textToCheck = filtered.join(", ").slice(0, 250);
 
     const options = {
       method: "POST",
@@ -49,7 +55,6 @@ async function getLanguageViaRecognition(website) {
 
     return languages;
   } catch (error) {
-    console.log("getLanguageViaLanguageRecognition", error);
     return null;
   }
 }

@@ -7,19 +7,21 @@ async function getWhoIsCountryV1(website) {
     const response = await fetch(`https://www.whois.com/whois/${hostname}`);
 
     if (!response.ok || response.status > 299) {
-      throw new Error(response.statusText);
+      return null;
     }
 
     const htmlString = await response.text();
 
     const dom = new JSDOM(htmlString);
 
+    if (!dom) return null;
+
     const blocks = dom.window.document.querySelectorAll(".df-block");
 
     if (!blocks) return null;
 
     const countryBlock = Array.from(blocks).find((block) =>
-      block.textContent.includes("Country")
+      block.textContent.toLowerCase().includes("country")
     );
 
     if (!countryBlock) return null;
@@ -29,7 +31,7 @@ async function getWhoIsCountryV1(website) {
     if (!rows) return null;
 
     const countryRow = Array.from(rows).find((row) =>
-      row.textContent.includes("Country")
+      row.textContent.toLowerCase().includes("country")
     );
 
     if (!countryRow) return null;
@@ -38,7 +40,7 @@ async function getWhoIsCountryV1(website) {
 
     return country.length === 2 ? country : null;
   } catch (error) {
-    throw error;
+    return null;
   }
 }
 
