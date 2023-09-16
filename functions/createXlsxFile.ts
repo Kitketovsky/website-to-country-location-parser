@@ -1,7 +1,7 @@
-import path from "path";
 import { IOutputRow } from "../types/OutputRow";
 import ExcelJS from "exceljs";
 import createScreenshotPath from "../utils/createScreenshotPath";
+import APP_CONFIG from "../config";
 
 export default async function createXlsxFile(
   metadata: (IOutputRow | null | undefined)[]
@@ -63,8 +63,7 @@ export default async function createXlsxFile(
       }
     }
 
-    const outputPath = path.join(process.cwd(), "output.xlsx");
-    await workbook.xlsx.writeFile(outputPath);
+    await workbook.xlsx.writeFile(APP_CONFIG.outputPath);
   } catch (error) {
     console.log("createXlsxFile error", error);
   }

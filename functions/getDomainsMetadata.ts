@@ -1,4 +1,4 @@
-import checkURLValidity from "./../utils/checkURLValidity";
+import isValidURL from "../utils/isValidURL";
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
@@ -6,9 +6,11 @@ import getWhoIsCountryV1 from "./../parsers/getWhoIsCountryV1";
 import getWhoIsCountryV2 from "./../parsers/getWhoIsCountryV2";
 import getLanguageViaRecognition from "./../parsers/getLanguageViaRecognition";
 import { IOutputRow } from "../types/OutputRow";
-import createScreenshotPath from "../utils/createScreenshotPath";
+import counter from "../utils/counter";
+import sleep from "../utils/sleep";
+import createScreenshot from "../lib/puppeteer/createScreenshot";
+import createStatsLogger from "../lib/log/createStatsLogger";
 
-const REQUEST_DELAY = 1000;
 const RECOGNITION_REQUEST_DELAY = 1500;
 
 puppeteer.use(StealthPlugin());
@@ -20,12 +22,14 @@ export default async function getDomainsMetadata(
     throw new Error("No input data found of it's empty");
   }
 
-  const interval = 10;
+  const CHUNK_SIZE = 9;
 
   let start = 0;
-  let end = interval;
+  let end = CHUNK_SIZE;
 
-  const response: (IOutputRow | null)[] = [];
+  let response: (IOutputRow | null)[] = [];
+
+  const log = createStatsLogger({ all: input.length });
 
   while (start < input.length) {
     const browser = await puppeteer.launch({
@@ -35,7 +39,9 @@ export default async function getDomainsMetadata(
     try {
       const portion = input.slice(start, end);
 
-      const promises = portion.map(async (row, index) => {
+      const addToRecognitionCallsCounter = counter();
+
+      const promises = portion.map(async (row) => {
         const output: IOutputRow = {
           website: row?.website,
           company: row?.company,
@@ -47,16 +53,11 @@ export default async function getDomainsMetadata(
           withImage: false,
         };
 
-        await new Promise((resolve) =>
-          setTimeout(resolve, index * REQUEST_DELAY)
-        );
-
         const page = await browser.newPage();
 
         try {
           if (!("website" in row)) {
-            output.error = "No website was provided";
-            return output;
+            throw new Error("No website was provided");
           }
 
           output.website = row.website
@@ -64,39 +65,23 @@ export default async function getDomainsMetadata(
             .toLowerCase()
             .replace("www.", "");
 
-          const isValidURL = checkURLValidity(output.website);
+          const isValidWebsite = isValidURL(output.website);
 
-          if (!isValidURL) {
-            output.error = "Invalid website URL";
-            return output;
+          if (!isValidWebsite) {
+            throw new Error("Invalid website URL");
           }
 
           const response = await page.goto(output.website);
 
-          await page.waitForNetworkIdle({ timeout: 10000 });
-
           if (!response) {
-            output.error = "No response from website";
-            return null;
+            throw new Error("No response from website");
           }
 
           if (!response.ok) {
-            await page.screenshot({
-              path: createScreenshotPath(output.website),
-              type: "jpeg",
-              quality: 70,
-            });
-
-            output.withImage = true;
-
-            output.error = `${
-              (response.status.toString(), response.statusText().slice(0, 40))
-            }`;
-
-            return output;
+            throw new Error("Response was not OK");
           }
 
-          if (response.url() !== row.website) {
+          if (response.url() !== output.website) {
             output.redirect = response.url();
           }
 
@@ -104,71 +89,82 @@ export default async function getDomainsMetadata(
             () => window.document.documentElement?.lang
           );
 
-          if (!langAttr) {
-            const content = await page.evaluate(() => {
-              let elements = Array.from(
-                document.querySelectorAll("p, h1, h2, span")
-              );
+          if (langAttr) {
+            output.language = langAttr;
+            log("success");
+            return output;
+          }
 
-              return elements
-                .map((element) =>
-                  element.textContent?.replace(/\s{2,}/g, "").trim()
-                )
-                .filter((text) => text && text.length > 15);
-            });
+          const content = await page.evaluate(() => {
+            const CONTENT_RICH_TAGS = "p, h1, h2, span";
 
-            const contentToCheck = content.join("; ").slice(0, 300);
-
-            await new Promise((resolve) => {
-              setTimeout(resolve, index * RECOGNITION_REQUEST_DELAY);
-            });
-
-            const recognizedLanguages = await getLanguageViaRecognition(
-              contentToCheck
+            let elements = Array.from(
+              document.querySelectorAll(CONTENT_RICH_TAGS)
             );
 
-            if (recognizedLanguages) {
-              output.language = recognizedLanguages;
-            } else {
-              await page.screenshot({
-                path: createScreenshotPath(output.website),
-                type: "jpeg",
-                quality: 70,
-              });
+            const MINIMUM_VALID_STRING_LENGTH = 15;
+            const REMOVE_ALL_WHITESPACE_REGEX = /\s{2,}/g;
 
-              output.withImage = true;
-            }
-          } else {
-            output.language = langAttr;
-          }
-        } catch (error) {
-          await page.screenshot({
-            path: createScreenshotPath(output.website),
-            type: "jpeg",
-            quality: 70,
+            return elements
+              .map((element) =>
+                element.textContent
+                  ?.replace(REMOVE_ALL_WHITESPACE_REGEX, "")
+                  .trim()
+              )
+              .filter(
+                (text) => text && text.length > MINIMUM_VALID_STRING_LENGTH
+              );
           });
 
+          const MAXIMUM_TEXT_LENGTH_FOR_RECOGNITION = 500;
+
+          const contentToCheck = content
+            .join(" ")
+            .slice(0, MAXIMUM_TEXT_LENGTH_FOR_RECOGNITION);
+
+          await sleep(
+            addToRecognitionCallsCounter() * RECOGNITION_REQUEST_DELAY
+          );
+
+          const recognizedLanguages = await getLanguageViaRecognition(
+            contentToCheck
+          );
+
+          if (!recognizedLanguages) {
+            throw new Error("Site language has not been recognized!");
+          }
+
+          output.language = recognizedLanguages;
+          log("success");
+          return output;
+        } catch (error) {
+          log("failed");
+          await createScreenshot({ page, website: output.website });
           output.withImage = true;
           // @ts-ignore
           output.error = error.message;
         } finally {
-          if (output.website) {
-            const whoisv1 = await getWhoIsCountryV1({
-              browser,
-              website: output.website,
-            });
-            const whoisv2 = await getWhoIsCountryV2({
-              browser,
-              website: output.website,
-            });
-
-            output.whoIsV1 = whoisv1;
-            output.whoIsV2 = whoisv2;
-          }
-
           if (!page.isClosed()) {
             await page.close();
           }
+
+          if (!output.website && !isValidURL(output.website)) {
+            return output;
+          }
+
+          const [whoIsV1, whoIsV2] = await Promise.all([
+            getWhoIsCountryV1({
+              browser,
+              website: output.website,
+            }),
+            getWhoIsCountryV2({
+              browser,
+              website: output.website,
+            }),
+          ]);
+
+          output.whoIsV1 = whoIsV1;
+          output.whoIsV2 = whoIsV2;
 
           return output;
         }
@@ -176,16 +172,14 @@ export default async function getDomainsMetadata(
 
       const portionResponse = await Promise.all(promises);
 
-      // @ts-ignore
-      response.push(portionResponse);
+      response = [...response, ...portionResponse];
     } catch (error) {
     } finally {
       await browser.close();
-
-      start += interval;
-      end += interval;
+      start += CHUNK_SIZE;
+      end += CHUNK_SIZE;
     }
   }
 
-  return response.flat();
+  return response;
 }
