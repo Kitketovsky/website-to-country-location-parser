@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "init": "node index.js"
+    "init": "npx tsc && dist/node index.js"
   },
   "keywords": [],
   "author": "",
@@ -12,7 +12,16 @@
   "dependencies": {
     "convert-excel-to-json": "^1.7.0",
     "dotenv": "^16.3.1",
-    "jsdom": "^22.1.0",
-    "json-2-csv": "^4.1.0"
+    "exceljs": "^4.3.0",
+    "puppeteer": "^21.2.1",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "user-agents": "^1.0.1444"
+  },
+  "devDependencies": {
+    "@types/convert-excel-to-json": "^1.7.2",
+    "@types/user-agents": "^1.0.2",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.2.2"
   }
 }

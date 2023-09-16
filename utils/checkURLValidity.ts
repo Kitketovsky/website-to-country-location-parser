@@ -1,4 +1,4 @@
-function checkURLValidity(url) {
+export default function checkURLValidity(url: string) {
   try {
     new URL(url);
     return true;
@@ -6,5 +6,3 @@ function checkURLValidity(url) {
     return false;
   }
 }
-
-module.exports = checkURLValidity;
