@@ -1,4 +1,5 @@
 import { Browser } from "puppeteer";
+import createPage from "../lib/puppeteer/createPage";
 
 export default async function getWhoIsCountryV1({
   browser,
@@ -7,7 +8,7 @@ export default async function getWhoIsCountryV1({
   browser: Browser;
   website: string;
 }) {
-  const page = await browser.newPage();
+  const page = await createPage(browser);
 
   try {
     const hostname = new URL(website).hostname;
@@ -18,7 +19,7 @@ export default async function getWhoIsCountryV1({
 
     if (!response) return null;
 
-    if (!response.ok() || response.status() > 299) {
+    if (!response.ok() || response.status() === 404) {
       return null;
     }
 
@@ -50,6 +51,8 @@ export default async function getWhoIsCountryV1({
   } catch (error) {
     return null;
   } finally {
-    await page.close();
+    if (!page.isClosed()) {
+      await page.close();
+    }
   }
 }

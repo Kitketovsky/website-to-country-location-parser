@@ -1,4 +1,3 @@
-import counter from "./../utils/counter";
 import checkURLValidity from "./../utils/checkURLValidity";
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
@@ -8,9 +7,8 @@ import getWhoIsCountryV2 from "./../parsers/getWhoIsCountryV2";
 import getLanguageViaRecognition from "./../parsers/getLanguageViaRecognition";
 import { IOutputRow } from "../types/OutputRow";
 import createScreenshotPath from "../utils/createScreenshotPath";
-import createPage from "../lib/puppeteer/createPage";
 
-const REQUEST_DELAY = 500;
+const REQUEST_DELAY = 1000;
 const RECOGNITION_REQUEST_DELAY = 1500;
 
 puppeteer.use(StealthPlugin());
@@ -22,16 +20,22 @@ export default async function getDomainsMetadata(
     throw new Error("No input data found of it's empty");
   }
 
-  const addDelayedItems = counter();
-  const allPromiseDelayCounter = counter();
+  const interval = 10;
 
-  const browser = await puppeteer.launch({
-    headless: "new",
-  });
+  let start = 0;
+  let end = interval;
 
-  try {
-    return await Promise.all(
-      input.map(async (row) => {
+  const response: (IOutputRow | null)[] = [];
+
+  while (start < input.length) {
+    const browser = await puppeteer.launch({
+      headless: "new",
+    });
+
+    try {
+      const portion = input.slice(start, end);
+
+      const promises = portion.map(async (row, index) => {
         const output: IOutputRow = {
           website: row?.website,
           company: row?.company,
@@ -43,19 +47,18 @@ export default async function getDomainsMetadata(
           withImage: false,
         };
 
-        const page = await createPage(browser);
+        await new Promise((resolve) =>
+          setTimeout(resolve, index * REQUEST_DELAY)
+        );
+
+        const page = await browser.newPage();
 
         try {
-          // Delay between requests
-          await new Promise((resolve) =>
-            setTimeout(resolve, allPromiseDelayCounter() * REQUEST_DELAY)
-          );
-
           if (!("website" in row)) {
+            output.error = "No website was provided";
             return output;
           }
 
-          // there might be several links in one string separated with a whitespace
           output.website = row.website
             .split(" ")[0]
             .toLowerCase()
@@ -64,18 +67,24 @@ export default async function getDomainsMetadata(
           const isValidURL = checkURLValidity(output.website);
 
           if (!isValidURL) {
+            output.error = "Invalid website URL";
             return output;
           }
 
           const response = await page.goto(output.website);
-          await page.waitForNetworkIdle();
 
-          if (!response) return null;
+          await page.waitForNetworkIdle({ timeout: 10000 });
+
+          if (!response) {
+            output.error = "No response from website";
+            return null;
+          }
 
           if (!response.ok) {
-            // TODO: take screenshot
             await page.screenshot({
               path: createScreenshotPath(output.website),
+              type: "jpeg",
+              quality: 70,
             });
 
             output.withImage = true;
@@ -111,10 +120,7 @@ export default async function getDomainsMetadata(
             const contentToCheck = content.join("; ").slice(0, 300);
 
             await new Promise((resolve) => {
-              setTimeout(
-                resolve,
-                addDelayedItems() * RECOGNITION_REQUEST_DELAY
-              );
+              setTimeout(resolve, index * RECOGNITION_REQUEST_DELAY);
             });
 
             const recognizedLanguages = await getLanguageViaRecognition(
@@ -126,6 +132,8 @@ export default async function getDomainsMetadata(
             } else {
               await page.screenshot({
                 path: createScreenshotPath(output.website),
+                type: "jpeg",
+                quality: 70,
               });
 
               output.withImage = true;
@@ -134,15 +142,15 @@ export default async function getDomainsMetadata(
             output.language = langAttr;
           }
         } catch (error) {
-          const typedError = error as unknown as {
-            cause?: { code?: string; reason?: string; message?: string };
-          };
+          await page.screenshot({
+            path: createScreenshotPath(output.website),
+            type: "jpeg",
+            quality: 70,
+          });
 
-          output.error = `${typedError?.cause?.code} ${(
-            typedError?.cause?.reason ||
-            typedError?.cause?.message ||
-            ""
-          ).slice(0, 40)}}`;
+          output.withImage = true;
+          // @ts-ignore
+          output.error = error.message;
         } finally {
           if (output.website) {
             const whoisv1 = await getWhoIsCountryV1({
@@ -158,15 +166,26 @@ export default async function getDomainsMetadata(
             output.whoIsV2 = whoisv2;
           }
 
-          await page.close();
+          if (!page.isClosed()) {
+            await page.close();
+          }
 
           return output;
         }
-      })
-    );
-  } catch (error) {
-    console.log("Uncaught error", error);
-  } finally {
-    await browser.close();
+      });
+
+      const portionResponse = await Promise.all(promises);
+
+      // @ts-ignore
+      response.push(portionResponse);
+    } catch (error) {
+    } finally {
+      await browser.close();
+
+      start += interval;
+      end += interval;
+    }
   }
+
+  return response.flat();
 }

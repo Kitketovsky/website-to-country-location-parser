@@ -1,58 +1,71 @@
 import path from "path";
 import { IOutputRow } from "../types/OutputRow";
 import ExcelJS from "exceljs";
+import createScreenshotPath from "../utils/createScreenshotPath";
 
 export default async function createXlsxFile(
   metadata: (IOutputRow | null | undefined)[]
 ) {
-  const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet("Sheet 1");
+  try {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Sheet 1");
 
-  worksheet.columns = [
-    { header: "Company", key: "company", width: 10 },
-    { header: "Website", key: "website", width: 10 },
-    { header: "Redirected To", key: "redirect", width: 10 },
-    { header: "Language", key: "language", width: 4 },
-    { header: "Whois (V1)", key: "whoIsV1", width: 4 },
-    { header: "Whois (V2)", key: "whoIsV2", width: 4 },
-    { header: "Error", key: "error", width: 10 },
-    { header: "Image", key: "image", width: 30 },
-  ];
+    worksheet.columns = [
+      { header: "Company", key: "company", width: 30 },
+      { header: "Website", key: "website", width: 30 },
+      { header: "Redirected To", key: "redirect", width: 30 },
+      { header: "Language", key: "language", width: 12 },
+      { header: "Whois (V1)", key: "whoIsV1", width: 12 },
+      { header: "Whois (V2)", key: "whoIsV2", width: 12 },
+      { header: "Error", key: "error", width: 20 },
+      { header: "Image", key: "image", width: 100 },
+    ];
 
-  for (let i = 0; i < metadata.length; i++) {
-    const item = metadata[i];
+    worksheet.pageSetup.verticalCentered = true;
 
-    if (!item) continue;
+    for (let i = 0; i < metadata.length; i++) {
+      const item = metadata[i];
 
-    const { company, website, redirect, language, whoIsV1, whoIsV2, error } =
-      item;
+      if (!item) continue;
 
-    worksheet.addRow({
-      company, // A
-      website, // B
-      redirect, // C
-      language, // D
-      whoIsV1, // E
-      whoIsV2, // F
-      error, //G
-    });
+      const {
+        company,
+        website,
+        redirect,
+        language,
+        whoIsV1,
+        whoIsV2,
+        error,
+        withImage,
+      } = item;
 
-    const screenshotFilename = new URL(website).hostname.replace(".", "");
+      const row = worksheet.addRow({
+        company, // A
+        website, // B
+        redirect, // C
+        language: language?.toUpperCase(), // D
+        whoIsV1, // E
+        whoIsV2, // F
+        error, //G
+      });
 
-    const screenshotPath = path.join(
-      process.cwd(),
-      `${screenshotFilename}.png`
-    );
+      if (withImage) {
+        row.height = 200;
 
-    const imageId = workbook.addImage({
-      filename: screenshotPath,
-      extension: "png",
-    });
+        const screenshotPath = createScreenshotPath(website);
 
-    const rowNumber = i + 1;
-    worksheet.addImage(imageId, `H${rowNumber}:H${rowNumber}`);
+        const imageId = workbook.addImage({
+          filename: screenshotPath,
+          extension: "jpeg",
+        });
+
+        worksheet.addImage(imageId, `H${i + 2}:H${i + 2}`);
+      }
+    }
+
+    const outputPath = path.join(process.cwd(), "output.xlsx");
+    await workbook.xlsx.writeFile(outputPath);
+  } catch (error) {
+    console.log("createXlsxFile error", error);
   }
-
-  const outputPath = path.join(process.cwd(), "output.xlsx");
-  await workbook.xlsx.writeFile(outputPath);
 }
